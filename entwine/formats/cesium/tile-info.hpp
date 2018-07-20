@@ -75,6 +75,17 @@ public:
             std::size_t depth,
             std::size_t tick = 0) const;
 
+	std::size_t size() const
+	{
+		std::size_t size(1); // This node...
+
+		// ... and the size of each child.
+		for (const auto& c : m_children)
+			size += c.second->size();
+
+		return size;
+	}
+
     // Returns true if this tile has been visited in our reverse traversal.
     // Otherwise, we are the first visitor so we must keep traversing upward.
     bool addChild(const TileInfo& child)

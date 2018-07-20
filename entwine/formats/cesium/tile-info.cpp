@@ -22,6 +22,10 @@ namespace entwine
 {
 namespace cesium
 {
+namespace
+{
+	std::size_t foundTileCount(8);
+}
 
 void TileInfo::write(
         const Metadata& metadata,
@@ -53,6 +57,7 @@ void TileInfo::write(
     }
 
     std::cout << "Writing root" << std::endl;
+	std::cout << "Wrote " << foundTileCount << " of " << size() << " tiles to tileset.json." << std::endl;
     io::ensurePut(endpoint, "tileset.json", json.toStyledString());
 }
 
@@ -91,13 +96,13 @@ Bounds TileInfo::conformingBounds(
         const Metadata& metadata,
         const std::size_t tick) const
 {
-    const double dblTick(tick);
-    std::size_t intTick(
-            1 << (m_depth - metadata.structure().nominalChunkDepth()));
+	const auto& s(metadata.structure());
+	const double dblTick(tick);
+    std::size_t intTick(1 << (m_depth - s.nominalChunkDepth()));
 
-    if (m_depth > metadata.structure().sparseDepthBegin())
+    if (m_depth > s.sparseDepthBegin())
     {
-        intTick >>= m_depth - metadata.structure().sparseDepthBegin();
+        intTick >>= m_depth - s.sparseDepthBegin();
     }
 
     const double maxTick(intTick);
@@ -124,71 +129,90 @@ bool TileInfo::insertInto(
     const std::size_t nextDepth(depth + 1);
     const double nextGeometricError(geometricError / 2.0);
 
-    if (m_ticks.count(tick))
-    {
-        if (depth >= m.structure().coldDepthBegin() || !tick)
-        {
-            found = true;
+	if (m_ticks.count(tick))
+	{
+		if (depth >= m.structure().coldDepthBegin() || !tick)
+		{
+			found = true;
 
-            json["boundingVolume"] = cesium::boundingVolumeJson(
-                    depth >= m.structure().coldDepthBegin() ?
-                        conformingBounds(m, tick) : m.boundsNativeCubic());
+			json["boundingVolume"] = cesium::boundingVolumeJson(
+				depth >= m.structure().coldDepthBegin() ?
+				conformingBounds(m, tick) : m.boundsNativeCubic());
 
-            json["geometricError"] = geometricError;
+			json["geometricError"] = geometricError;
 
-            json["content"]["url"] =
-                m_id.str() + "-" + std::to_string(tick) + ".pnts";
-        }
+			json["content"]["url"] =
+				m_id.str() + "-" + std::to_string(tick) + ".pnts";
+		}
 
-        for (const auto& c : m_children)
-        {
-            const auto& child(*c.second);
-            const std::size_t baseTick(tick * 2);
+		for (const auto& c : m_children)
+		{
+			const auto& child(*c.second);
+			auto nextTick(tick);
+			auto insertChildOrRestart([&]()
+			{
+				Json::Value next;
 
-            for (auto nextTick(baseTick); nextTick < baseTick + 2; ++nextTick)
-            {
-                Json::Value next;
+				const auto fromBase(nextDepth - m.structure().baseDepthBegin());
 
-                const auto fromBase(nextDepth - m.structure().baseDepthBegin());
+				if (fromBase % m.cesiumSettings()->tilesetSplit() == 0)
+				{
+					// Insert links out to the child metadata files.
+					next["boundingVolume"] =
+						cesium::boundingVolumeJson(
+							child.conformingBounds(m, nextTick));
 
-                if (fromBase % m.cesiumSettings()->tilesetSplit() == 0)
-                {
-                    // Insert links out to the child metadata files.
-                    next["boundingVolume"] =
-                        cesium::boundingVolumeJson(
-                                child.conformingBounds(m, nextTick));
+					next["content"]["url"] =
+						"tileset-" + child.id().str() + "-" +
+						std::to_string(nextTick) + ".json";
 
-                    next["content"]["url"] =
-                        "tileset-" + child.id().str() + "-" +
-                        std::to_string(nextTick) + ".json";
+					next["geometricError"] = nextGeometricError;
 
-                    next["geometricError"] = nextGeometricError;
+					// Gather and write the contents of those files.
+					if (child.restart(
+						m,
+						endpoint,
+						nextGeometricError,
+						nextDepth,
+						nextTick))
+					{
+						json["children"].append(next);
+					}
+				}
+				else if (
+					child.insertInto(
+						next,
+						m,
+						endpoint,
+						nextGeometricError,
+						nextDepth,
+						nextTick))
+				{
+					json["children"].append(next);
+				}
+			});
 
-                    // Gather and write the contents of those files.
-                    if (child.restart(
-                                m,
-                                endpoint,
-                                nextGeometricError,
-                                nextDepth,
-                                nextTick))
-                    {
-                        json["children"].append(next);
-                    }
-                }
-                else if (
-                        child.insertInto(
-                            next,
-                            m,
-                            endpoint,
-                            nextGeometricError,
-                            nextDepth,
-                            nextTick))
-                {
-                    json["children"].append(next);
-                }
-            }
-        }
-    }
+			if (child.m_ticks.count(tick))
+			{
+				insertChildOrRestart();
+			}
+			else
+			{
+				const std::size_t baseTick(tick * 2);
+
+				for (nextTick = baseTick; nextTick < baseTick + 2; ++nextTick)
+				{
+					//for (const auto& t : m_ticks)
+					//{
+					//	const std::size_t nextTick(t.first);
+					insertChildOrRestart();
+				}
+			}
+		}
+	}
+
+	if (found)
+		foundTileCount++;
 
     return found;
 }

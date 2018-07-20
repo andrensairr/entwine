@@ -240,6 +240,8 @@ void Cold::saveCesiumMetadata(const arbiter::Endpoint& endpoint) const
 
     std::cout << "Serializing tileset metadata" << std::endl;
 
+    std::cout << "Built tree of " << tiles.at(m_structure.baseIndexBegin()).size() << " tiles." << std::endl;
+
     cesium::Tileset tileset(
             m_builder.metadata(),
             tiles.at(m_structure.baseIndexBegin()));

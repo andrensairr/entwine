@@ -94,7 +94,6 @@ protected:
     std::size_t divisor() const
     {
         const auto& s(m_metadata.structure());
-
         std::size_t d(1 << s.nominalChunkDepth());
 
         if (m_depth > s.sparseDepthBegin())
